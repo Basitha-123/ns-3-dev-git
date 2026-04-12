@@ -237,9 +237,9 @@ void
 RedQueueDisc::SetAredAlpha(double alpha)
 {
     NS_LOG_FUNCTION(this << alpha);
-    m_alpha = alpha;
+    m_aRedAlpha = alpha;
 
-    if (m_alpha > 0.01)
+    if (m_aRedAlpha > 0.01)
     {
         NS_LOG_WARN("Alpha value is above the recommended bound!");
     }
@@ -249,16 +249,16 @@ double
 RedQueueDisc::GetAredAlpha()
 {
     NS_LOG_FUNCTION(this);
-    return m_alpha;
+    return m_aRedAlpha;
 }
 
 void
 RedQueueDisc::SetAredBeta(double beta)
 {
     NS_LOG_FUNCTION(this << beta);
-    m_beta = beta;
+    m_aRedBeta = beta;
 
-    if (m_beta < 0.83)
+    if (m_aRedBeta < 0.83)
     {
         NS_LOG_WARN("Beta value is below the recommended bound!");
     }
@@ -268,7 +268,7 @@ double
 RedQueueDisc::GetAredBeta()
 {
     NS_LOG_FUNCTION(this);
-    return m_beta;
+    return m_aRedBeta;
 }
 
 void
@@ -331,7 +331,7 @@ RedQueueDisc::DoEnqueue(Ptr<QueueDiscItem> item)
 {
     NS_LOG_FUNCTION(this << item);
 
-    uint32_t nQueued = GetInternalQueue(0)->GetCurrentSize().GetValue();
+    uint32_t nCurrent_queue_len = GetInternalQueue(0)->GetCurrentSize().GetValue();
 
     // simulate number of packets arrival during idle period
     uint32_t m = 0;
@@ -354,17 +354,16 @@ RedQueueDisc::DoEnqueue(Ptr<QueueDiscItem> item)
         m_idle = 0;
     }
 
-    m_qAvg = Estimator(nQueued, m + 1, m_qAvg, m_qW);
+    m_qAvg = Estimator(nCurrent_queue_len, m + 1, m_qAvg, m_qW);
 
     NS_LOG_DEBUG("\t bytesInQueue  " << GetInternalQueue(0)->GetNBytes() << "\tQavg " << m_qAvg);
-    NS_LOG_DEBUG("\t packetsInQueue  " << GetInternalQueue(0)->GetNPackets() << "\tQavg "
-                                       << m_qAvg);
+    NS_LOG_DEBUG("\t packetsInQueue  " << GetInternalQueue(0)->GetNPackets() << "\tQavg "<< m_qAvg);
 
     m_count++;
     m_countBytes += item->GetSize();
 
     uint32_t dropType = DTYPE_NONE;
-    if (m_qAvg >= m_minTh && nQueued > 1)
+    if (m_qAvg >= m_minTh && nCurrent_queue_len > 1)
     {
         if ((!m_isGentle && m_qAvg >= m_maxTh) || (m_isGentle && m_qAvg >= 2 * m_maxTh))
         {
@@ -383,7 +382,7 @@ RedQueueDisc::DoEnqueue(Ptr<QueueDiscItem> item)
             m_countBytes = item->GetSize();
             m_old = 1;
         }
-        else if (DropEarly(item, nQueued))
+        else if (DropEarly(item, nCurrent_queue_len))
         {
             NS_LOG_LOGIC("DropEarly returns 1");
             dropType = DTYPE_UNFORCED;
@@ -392,7 +391,7 @@ RedQueueDisc::DoEnqueue(Ptr<QueueDiscItem> item)
     else
     {
         // No packets are being dropped
-        m_vProb = 0.0;
+        m_Pa = 0.0;
         m_old = 0;
     }
 
@@ -556,12 +555,7 @@ RedQueueDisc::InitializeParams()
         }
     }
 
-    NS_LOG_DEBUG("\tm_delay " << m_linkDelay.GetSeconds() << "; m_isWait " << m_isWait << "; m_qW "
-                              << m_qW << "; m_ptc " << m_ptc << "; m_minTh " << m_minTh
-                              << "; m_maxTh " << m_maxTh << "; m_isGentle " << m_isGentle
-                              << "; th_diff " << th_diff << "; lInterm " << m_lInterm << "; va "
-                              << m_vA << "; cur_max_p " << m_curMaxP << "; v_b " << m_vB
-                              << "; m_vC " << m_vC << "; m_vD " << m_vD);
+    NS_LOG_DEBUG("\tm_delay " << m_linkDelay.GetSeconds() << "; m_isWait " << m_isWait << "; m_qW "<< m_qW << "; m_ptc " << m_ptc << "; m_minTh " << m_minTh<< "; m_maxTh " << m_maxTh << "; m_isGentle " << m_isGentle<< "; th_diff " << th_diff << "; lInterm " << m_lInterm << "; va "<< m_vA << "; cur_max_p " << m_curMaxP << "; v_b " << m_vB<< "; m_vC " << m_vC << "; m_vD " << m_vD);
 }
 
 // Updating m_curMaxP, following the pseudocode
@@ -600,13 +594,13 @@ RedQueueDisc::UpdateMaxP(double newAvg)
     if (newAvg < m_minTh + m_part && m_curMaxP > m_bottom)
     {
         // we should increase the average queue size, so decrease m_curMaxP
-        m_curMaxP = m_curMaxP * m_beta;
+        m_curMaxP = m_curMaxP * m_aRedBeta;
         m_lastSet = now;
     }
     else if (newAvg > m_maxTh - m_part && m_top > m_curMaxP)
     {
         // we should decrease the average queue size, so increase m_curMaxP
-        double alpha = m_alpha;
+        double alpha = m_aRedAlpha;
         if (alpha > 0.25 * m_curMaxP)
         {
             alpha = 0.25 * m_curMaxP;
@@ -620,7 +614,7 @@ RedQueueDisc::UpdateMaxP(double newAvg)
 double
 RedQueueDisc::Estimator(uint32_t nQueued, uint32_t m, double oldAvg, double qW)
 {
-    NS_LOG_FUNCTION(this << nQueued << m << qAvg << qW);
+    NS_LOG_FUNCTION(this << nCurrent_queue_len << m << qAvg << qW);
 
     double newAvg = oldAvg * std::pow(1.0 - qW, m);
     newAvg += qW * nQueued;
@@ -645,7 +639,7 @@ RedQueueDisc::DropEarly(Ptr<QueueDiscItem> item, uint32_t qSize)
     NS_LOG_FUNCTION(this << item << qSize);
 
     double prob1 = CalculatePNew();
-    m_vProb = ModifyP(prob1, item->GetSize());
+    m_Pa = ModifyP(prob1, item->GetSize());
 
     // Drop probability is computed, pick random number and act
     if (m_cautious == 1)
@@ -665,7 +659,7 @@ RedQueueDisc::DropEarly(Ptr<QueueDiscItem> item, uint32_t qSize)
         }
     }
 
-    double u = m_uv->GetValue();
+    double R = m_uv->GetValue();
 
     if (m_cautious == 2)
     {
@@ -681,13 +675,13 @@ RedQueueDisc::DropEarly(Ptr<QueueDiscItem> item, uint32_t qSize)
 
         if (ratio < 1.0)
         {
-            u *= 1.0 / ratio;
+            R *= 1.0 / ratio;
         }
     }
 
-    if (u <= m_vProb)
+    if (u <= m_Pa)
     {
-        NS_LOG_LOGIC("u <= m_vProb; u " << u << "; m_vProb " << m_vProb);
+        NS_LOG_LOGIC("u <= m_Pa; u " << u << "; m_Pa " << m_Pa);
 
         // DROP or MARK
         m_count = 0;
@@ -705,52 +699,52 @@ double
 RedQueueDisc::CalculatePNew()
 {
     NS_LOG_FUNCTION(this);
-    double p;
+    double Pd;
 
     if (m_isGentle && m_qAvg >= m_maxTh)
     {
-        // p ranges from m_curMaxP to 1 as the average queue
+        // Pd ranges from m_curMaxP to 1 as the average queue
         // size ranges from m_maxTh to twice m_maxTh
-        p = m_vC * m_qAvg + m_vD;
+        Pd = m_vC * m_qAvg + m_vD;
     }
     else if (!m_isGentle && m_qAvg >= m_maxTh)
     {
         /*
-         * OLD: p continues to range linearly above m_curMaxP as
+         * OLD: Pd continues to range linearly above m_curMaxP as
          * the average queue size ranges above m_maxTh.
-         * NEW: p is set to 1.0
+         * NEW: Pd is set to 1.0
          */
-        p = 1.0;
+        Pd = 1.0;
     }
     else
     {
         /*
-         * p ranges from 0 to m_curMaxP as the average queue size ranges from
+         * Pd ranges from 0 to m_curMaxP as the average queue size ranges from
          * m_minTh to m_maxTh
          */
-        p = m_vA * m_qAvg + m_vB;
+        Pd = m_vA * m_qAvg + m_vB;
 
         if (m_isNonlinear)
         {
-            p *= p * 1.5;
+            Pd *= Pd * 1.5;
         }
 
-        p *= m_curMaxP;
+        Pd *= m_curMaxP;
     }
 
-    if (p > 1.0)
+    if (Pd > 1.0)
     {
-        p = 1.0;
+        Pd = 1.0;
     }
 
-    return p;
+    return Pd;
 }
 
 // Returns a probability using these function parameters for the DropEarly function
 double
-RedQueueDisc::ModifyP(double p, uint32_t size)
+RedQueueDisc::ModifyP(double Pd, uint32_t size)
 {
-    NS_LOG_FUNCTION(this << p << size);
+    NS_LOG_FUNCTION(this << Pd << size);
     auto count1 = (double)m_count;
 
     if (GetMaxSize().GetUnit() == QueueSizeUnit::BYTES)
@@ -760,42 +754,42 @@ RedQueueDisc::ModifyP(double p, uint32_t size)
 
     if (m_isWait)
     {
-        if (count1 * p < 1.0)
+        if (count1 * Pd < 1.0)
         {
-            p = 0.0;
+            Pd = 0.0;
         }
         else if (count1 * p < 2.0)
         {
-            p /= (2.0 - count1 * p);
+            Pd /= (2.0 - count1 * p);
         }
         else
         {
-            p = 1.0;
+            Pd = 1.0;
         }
     }
     else
     {
-        if (count1 * p < 1.0)
+        if (count1 * Pd < 1.0)
         {
-            p /= (1.0 - count1 * p);
+            Pd /= (1.0 - count1 * Pd);
         }
         else
         {
-            p = 1.0;
+            Pd = 1.0;
         }
     }
 
-    if ((GetMaxSize().GetUnit() == QueueSizeUnit::BYTES) && (p < 1.0))
+    if ((GetMaxSize().GetUnit() == QueueSizeUnit::BYTES) && (Pd < 1.0))
     {
-        p = (p * size) / m_meanPktSize;
+        Pd = (Pd * size) / m_meanPktSize;
     }
 
-    if (p > 1.0)
+    if (Pd > 1.0)
     {
-        p = 1.0;
+        Pd = 1.0;
     }
 
-    return p;
+    return Pd;
 }
 
 Ptr<QueueDiscItem>
@@ -863,8 +857,7 @@ RedQueueDisc::CheckConfig()
     {
         // add a DropTail queue
         AddInternalQueue(
-            CreateObjectWithAttributes<DropTailQueue<QueueDiscItem>>("MaxSize",
-                                                                     QueueSizeValue(GetMaxSize())));
+            CreateObjectWithAttributes<DropTailQueue<QueueDiscItem>>("MaxSize",QueueSizeValue(GetMaxSize())));
     }
 
     if (GetNInternalQueues() != 1)
